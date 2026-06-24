@@ -121,27 +121,109 @@ with info_col:
         st.session_state["show_info"] = not st.session_state["show_info"]
 
 if st.session_state["show_info"]:
-    st.info(
-        "**About Yieldrisk**\n\n"
-        "Yieldrisk follows how a fallow and crop are progressing against "
-        "the historical record at the same site and on the same soil. Pick a "
-        "soil type, set your fallow start, plant and harvest dates, and enter "
-        "your crop's water-use efficiency (WUE) and threshold water, then "
-        "select a weather station to pull daily climate data from SILO "
-        "(1996 onwards).\n\n"
-        "**Fallow water gain** and **fallow nitrogen gain** are simulated using "
-        "a daily soil water balance (the PERFECT model) and a nitrogen "
-        "mineralisation model, run from your fallow start date to your plant "
-        "date.\n\n"
-        "**In-crop rain** is cumulative rainfall since planting. "
-        "**Photothermal quotient** is cumulative solar radiation divided by "
-        "mean temperature since planting — higher values generally favour "
-        "grain set. **Crop yield outlook** combines soil water at planting, "
-        "in-crop rain, your threshold water and WUE into a simple potential "
-        "yield estimate.\n\n"
-        "Each gauge bar shows this season's value against a band built from "
-        "comparable historical years at the same site, soil and dates."
-    )
+    with st.container(border=True):
+        st.markdown("""
+**About Yieldrisk**
+
+Many agricultural decisions are based on our understanding of expectations.
+Such expectations are based on a blend of **current conditions** (knowable) and
+**future expectations.** Future expectations relating to weather can be derived from
+long term weather data providing a probabilistic picture of the range of possible outcomes.
+Simple models support better information relating to the current and future outcomes.
+
+Set up each paddock with a **soil type, dates** for start of fallow, plant and harvest
+along with a **Water Use Efficiency** and **threshold water** value (WUE model).
+
+**Select a site** by typing the name of a nearby BoM weather site (hit Enter).
+A list of sites will come up — select the closest match and hit Select.
+It may take up to 1 minute to load 30 years of data but once loaded the analysis
+will be much faster for this site (for 1 day).
+
+**Yieldrisk** provides a comparative analysis of five aspects of crop outcomes:
+- Effectiveness of fallow in storing **soil water** (Howwet? 1984).
+- **Nitrogen mineralisation** influenced by surface moisture and temperature (ApSim 1998).
+- **In-crop rain** to date and expected rain to harvest.
+- **Photothermal quotient** — an index of favourable radiation and temperature.
+- Summarised as a **yield index** based on water use efficiency (French and Schultz 1984)
+  which is informed by three of the above: soil water at planting, nitrogen mineralisation
+  and in-crop rain to date.
+
+**Interpretation**
+
+Each gauge bar shows this season's value against a band built from 30 years of
+daily weather data at the same site, soil and dates.
+
+**Focus on the relativities** of the current season compared to historic years rather
+than on the absolute values (mm soil water, kg/ha). The five attributes are presented as:
+- **low** (lowest 25% of years)
+- **below average** (25–45%)
+- **average** (middle 45–55%)
+- **above average** (55–75%)
+- **high** (top 25% of years)
+
+Weather history provides us with a robust source of probabilities of future events by
+applying climatology. **No forecasts** are included in these analyses.
+
+---
+
+**Acknowledgements**
+
+**Weather data:** Queensland Government's SILO database sourced from the Bureau of Meteorology.
+
+**Soil water estimates:** Applies a well-tested water balance model that considers evaporation,
+runoff and drainage losses on a daily basis, as used in Howwet? (Dimes et al., 1996).
+
+**Nitrogen mineralisation:** Conversion of organic nitrogen to plant available forms is
+controlled by the moisture content of the surface layers and temperature using a simplified
+version of a model in APSim (Probert et al., 1998) and implemented in Howwet? (Freebairn et al., 1994).
+
+**Yield estimates** are based on a version of the Water Use Efficiency (WUE) model
+(French and Schultz, 1984) as implemented in Potential Yield Calculator (Tennant and Tennant, 2000).
+
+**Interface:** Interface designs are a blend of several early decision support tools
+(Howwet?, Howoften? and Australian CliMate, Freebairn and McClymont 2025) and many other
+products developed since the widespread uptake of computers in agriculture.
+
+---
+
+**Disclosure**
+
+These analyses have been developed based on previous experience in designing climate-focused
+decision support tools using Anthropic's Claude AI software (Anthropic, 2026).
+This software was built to demonstrate new software and App development capabilities.
+
+Comments welcomed — David Freebairn · david.freebairn@gmail.com
+
+---
+
+**References**
+
+Anthropic. (2026). *Claude (Sonnet 4.6)* [Large language model]. https://claude.ai
+
+Dimes, J. P., Freebairn, D. M., & Glanville, S. F. (1996). HOWWET? A tool for predicting
+fallow water storage. *Proceedings of the 8th Australian Agronomy Conference*, Toowoomba, pp. 207–210.
+https://agronomyaustraliaproceedings.org
+
+French, R. J., & Schultz, J. E. (1984). Water use efficiency of wheat in a Mediterranean-type
+environment. I. The relation between yield, water use and climate.
+*Australian Journal of Agricultural Research, 35*, 743–764.
+
+Freebairn, D. M., Hamilton, A. H., Cox, P. G., & Holzworth, D. (1994). *HOWWET? Estimating
+the storage of water in your soil using rainfall records: A computer program.*
+Agricultural Production Systems Research Unit, Queensland DPI–CSIRO.
+
+Freebairn, D. M., & McClymont, D. (2025). Australian CliMate – A decision support tool
+for agricultural decision makers. *Climate* (preprint 3755700).
+https://doi.org/10.20944/preprints202507.1081.v1
+
+Probert, M. E., Dimes, J. P., Keating, B. A., Dalal, R. C., & Strong, W. M. (1998).
+APSIM's water and nitrogen modules and simulation of the dynamics of water and nitrogen
+in fallow systems. *Agricultural Systems, 56*(1), 1–28.
+
+Tennant, S., & Tennant, D. (2000). *Potential Yield Calculator (Version 2.31)* [Computer software].
+Agriculture Western Australia.
+""")
+
 
 # ---------------------------------------------------------------------------
 # SETUP PANEL — soil, dates, crop, then site (site moved to bottom to avoid
@@ -239,11 +321,11 @@ with st.container(border=True):
     c1, c2, c3, c4 = st.columns(4)
     with c1:
         wue = st.number_input(
-            "WUE (kg/ha/mm)", min_value=0, value=25, step=1, key="wue",
+            "WUE (kg/ha/mm)", min_value=0, value=15, step=1, key="wue",
         )
     with c3:
         threshold_water = st.number_input(
-            "Threshold water (mm)", min_value=0, value=120, step=5, key="threshold_water",
+            "Threshold water (mm)", min_value=0, value=100, step=5, key="threshold_water",
         )
 
     st.markdown('<p class="section-title">Select site</p>', unsafe_allow_html=True)
