@@ -61,6 +61,7 @@ from core.dashboard_metrics import (
     MetricResult,
 )
 from gauge_utils import make_gauge_bar_figure, make_detail_figure, make_yield_projection_figure
+from core.sample_data import sample_data_available, load_sample_station, load_sample_climate, sample_date_range
 
 try:
     from core.summary_doc import build_summary_docx
@@ -91,9 +92,56 @@ GAUGE_COLORS = {
 MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
 
-@st.cache_data(ttl=3600, show_spinner=False)
 def _search(query: str):
     return search_stations(query)
+
+
+def _silo_down_sample_offer():
+    """The offer text shown when SILO is unavailable and sample data exists."""
+    if not sample_data_available():
+        return ""
+    try:
+        start, end = sample_date_range()
+        return (
+            f"Our data feed from SILO (https://www.longpaddock.qld.gov.au/silo/) "
+            f"is currently unavailable. Would you like to use sample data for "
+            f"**Dalby Post Office** ({start.strftime('%Y')}–{end.strftime('%Y')}) in the meantime?"
+        )
+    except Exception:
+        return (
+            "Our data feed from SILO (https://www.longpaddock.qld.gov.au/silo/) "
+            "is currently unavailable. Would you like to use sample data for "
+            "**Dalby Post Office** in the meantime?"
+        )
+
+
+def _activate_sample(site_area=None):
+    """Switch the session to using the bundled Dalby sample dataset."""
+    sample_station = load_sample_station()
+    st.session_state["using_sample"] = True
+    st.session_state["confirmed"] = True
+    st.session_state["chosen"] = sample_station["label"] + "  [sample data]"
+    st.session_state["stations"] = [sample_station]
+    st.session_state["climate_ready"] = False
+    st.session_state["silo_down"] = False
+    st.session_state.pop("climate_df", None)
+    st.session_state.pop("climate_key", None)
+    if site_area is not None:
+        site_area.empty()
+
+
+def _show_silo_down_fallback(site_area):
+    """Render the SILO-down message + sample data offer inside the site area."""
+    st.warning(
+        "⚠️ **SILO data feed is currently unavailable.**\n\n"
+        + (_silo_down_sample_offer() if sample_data_available() else
+           "Please try again later.")
+    )
+    if sample_data_available():
+        if st.button("📂 Use Dalby sample data in the meantime", key="search_fallback_btn"):
+            _activate_sample(site_area)
+            st.rerun()
+
 
 
 def load_soil_files():
@@ -238,6 +286,9 @@ if st.session_state.pop("reset_station", False):
     st.session_state["last_query"] = ""
     st.session_state["query"] = ""
     st.session_state["climate_ready"] = False
+    st.session_state["using_sample"] = False
+    st.session_state["silo_down"] = False
+    st.session_state.pop("silo_error", None)
     st.session_state.pop("climate_df", None)
     st.session_state.pop("climate_key", None)
 
@@ -321,11 +372,11 @@ with st.container(border=True):
     c1, c2, c3, c4 = st.columns(4)
     with c1:
         wue = st.number_input(
-            "WUE (kg/ha/mm)", min_value=0, value=15, step=1, key="wue",
+            "WUE (kg/ha/mm)", min_value=0, value=25, step=1, key="wue",
         )
     with c3:
         threshold_water = st.number_input(
-            "Threshold water (mm)", min_value=0, value=100, step=5, key="threshold_water",
+            "Threshold water (mm)", min_value=0, value=120, step=5, key="threshold_water",
         )
 
     st.markdown('<p class="section-title">Select site</p>', unsafe_allow_html=True)
@@ -349,54 +400,94 @@ with st.container(border=True):
                 key="query",
             )
             if query and len(query) >= 3:
-                if st.session_state.get("last_query") != query:
+                # Check silo_down FIRST, before the last_query guard, so
+                # the fallback persists across reruns without re-running the search.
+                if st.session_state.get("silo_down") and st.session_state.get("last_query") == query:
+                    _show_silo_down_fallback(site_area)
+                elif st.session_state.get("last_query") != query:
                     with st.spinner("Searching..."):
                         try:
                             st.session_state["stations"] = _search(query)
+                            st.session_state["silo_down"] = False
+                            st.session_state.pop("silo_error", None)
                         except Exception as e:
-                            st.error(f"Search failed: {e}")
                             st.session_state["stations"] = []
+                            st.session_state["silo_error"] = str(e)
+                            st.session_state["silo_down"] = True
                     st.session_state["last_query"] = query
                     st.session_state.pop("climate_df", None)
                     st.session_state.pop("climate_key", None)
                     st.session_state["climate_ready"] = False
 
-                stations = st.session_state.get("stations", [])
-                if stations:
-                    labels = [s["label"] for s in stations]
-                    if len(labels) == 1:
-                        st.session_state["chosen"] = labels[0]
-                        st.session_state["confirmed"] = True
-                        st.session_state["climate_ready"] = False
-                        site_area.empty()
-                        st.rerun()
+                    if st.session_state.get("silo_down"):
+                        _show_silo_down_fallback(site_area)
                     else:
-                        st.caption(f"**{len(labels)} stations found** — select one:")
-                        chosen = st.radio("Station", options=labels, label_visibility="collapsed", key="station_radio")
-                        if st.button("Select"):
-                            st.session_state["chosen"] = chosen
+                        stations = st.session_state.get("stations", [])
+                        if stations:
+                            labels = [s["label"] for s in stations]
+                            if len(labels) == 1:
+                                st.session_state["chosen"] = labels[0]
+                                st.session_state["confirmed"] = True
+                                st.session_state["climate_ready"] = False
+                                site_area.empty()
+                                st.rerun()
+                            else:
+                                st.caption(f"**{len(labels)} stations found** — select one:")
+                                chosen = st.radio("Station", options=labels, label_visibility="collapsed", key="station_radio")
+                                if st.button("Select"):
+                                    st.session_state["chosen"] = chosen
+                                    st.session_state["confirmed"] = True
+                                    st.session_state["stations"] = [s for s in stations if s["label"] == chosen]
+                                    st.session_state["climate_ready"] = False
+                                    site_area.empty()
+                                    st.rerun()
+                        elif st.session_state.get("last_query"):
+                            st.warning("No stations found. Try a shorter search term.")
+                else:
+                    # Same query, no error — show existing results
+                    stations = st.session_state.get("stations", [])
+                    if stations:
+                        labels = [s["label"] for s in stations]
+                        if len(labels) == 1:
+                            st.session_state["chosen"] = labels[0]
                             st.session_state["confirmed"] = True
-                            st.session_state["stations"] = [s for s in stations if s["label"] == chosen]
                             st.session_state["climate_ready"] = False
                             site_area.empty()
                             st.rerun()
-                elif st.session_state.get("last_query"):
-                    st.warning("No stations found. Try a shorter search term.")
+                        else:
+                            st.caption(f"**{len(labels)} stations found** — select one:")
+                            chosen = st.radio("Station", options=labels, label_visibility="collapsed", key="station_radio")
+                            if st.button("Select"):
+                                st.session_state["chosen"] = chosen
+                                st.session_state["confirmed"] = True
+                                st.session_state["stations"] = [s for s in stations if s["label"] == chosen]
+                                st.session_state["climate_ready"] = False
+                                site_area.empty()
+                                st.rerun()
+                    elif st.session_state.get("last_query"):
+                        st.warning("No stations found. Try a shorter search term.")
         else:
             chosen = st.session_state.get("chosen", "")
             stations = st.session_state.get("stations", [])
             c1, c2 = st.columns([5, 1.4])
             with c1:
-                st.success(f"📍 {chosen}")
+                if st.session_state.get("using_sample"):
+                    st.warning("📂 Using **Dalby sample data** — SILO unavailable. Change site when SILO is restored.")
+                else:
+                    st.success(f"📍 {chosen}")
             with c2:
                 if st.button("Change", width="stretch"):
                     st.session_state["reset_station"] = True
                     site_area.empty()
                     st.rerun()
-            station_info = next((s for s in stations if s["label"] == chosen), None)
+            station_info = next((s for s in stations if s["label"] == chosen or
+                                 s["label"] + "  [sample data]" == chosen), None)
+            # For sample path, station_info may not match by label — load directly
+            if station_info is None and st.session_state.get("using_sample"):
+                station_info = load_sample_station()
             if station_info:
                 save_station(station_info)
-            if not st.session_state.get("climate_ready", False):
+            if not st.session_state.get("climate_ready", False) and not st.session_state.get("using_sample"):
                 st.warning("⏳ Downloading 30 years of daily data may take 30-60 seconds. Please wait!")
 
 
@@ -449,17 +540,39 @@ harvest_md = (MONTH_NAMES.index(harvest_month) + 1, harvest_day)
 
 # ── Fetch climate + soil (cached) ───────────────────────────────────────────
 _was_ready_before_fetch = st.session_state.get("climate_ready", False)
-with st.spinner("Fetching SILO climate data (first run only — cached after)..."):
+
+# If using sample data, load it directly — no spinner needed
+if st.session_state.get("using_sample"):
     try:
-        climate_df = ensure_climate_cached(
-            station_id=station_info["id"],
-            lat=station_info.get("lat"), lon=station_info.get("lon"),
-            session_state=st.session_state,
-        )
+        climate_df = load_sample_climate()
         st.session_state["climate_ready"] = True
     except Exception as e:
-        st.error(f"Could not fetch climate data: {e}")
+        st.error(f"Could not load sample data: {e}")
         st.stop()
+else:
+    with st.spinner("Fetching SILO climate data (first run only — cached after)..."):
+        try:
+            climate_df = ensure_climate_cached(
+                station_id=station_info["id"],
+                lat=station_info.get("lat"), lon=station_info.get("lon"),
+                session_state=st.session_state,
+            )
+            st.session_state["climate_ready"] = True
+            st.session_state["silo_down"] = False
+        except Exception as e:
+            # SILO fetch failed — offer the sample data fallback
+            st.session_state["silo_down"] = True
+            st.session_state["silo_error"] = str(e)
+            st.warning(
+                f"⚠️ Could not fetch climate data from SILO: {e}\n\n"
+                + (_silo_down_sample_offer() if sample_data_available() else
+                   "SILO data is currently unavailable. Please try again later.")
+            )
+            if sample_data_available():
+                if st.button("📂 Use Dalby sample data in the meantime", key="fetch_fallback_btn"):
+                    _activate_sample(site_area=None)
+                    st.rerun()
+            st.stop()
 
 # The "downloading" message above (inside the setup box) was already drawn
 # earlier in this same script run, before climate_ready flipped to True —
@@ -550,11 +663,13 @@ for i, (result, (color_low, color_high)) in enumerate(GAUGES):
 # back up to the setup panel
 month_names = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
 def _fmt(md): return f"{md[1]} {month_names[md[0]-1]}"
+sample_flag = "  ·  ⚠️ Sample data (Dalby) — SILO unavailable" if st.session_state.get("using_sample") else ""
 st.caption(
     f"📍 {station_info.get('name', station_info.get('label',''))}  ·  "
     f"{profile.name}  ·  "
     f"Fallow {_fmt(fallow_start_md)} → Plant {_fmt(plant_md)} → Harvest {_fmt(harvest_md)}  ·  "
     f"WUE {wue} kg/ha/mm  ·  Threshold {threshold_water} mm"
+    + sample_flag
 )
 
 # The yield detail chart is always built fresh for the summary document,
